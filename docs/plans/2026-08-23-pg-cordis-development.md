@@ -17,6 +17,7 @@ Status: **骨架，不是 deep plan。** 每条以后单独写详细 deep plan�
 - **并行**：条目标了「可与 … 并行」。无依赖交叉的 deep plan 可以同时写、同时做。
 - **一条 = 一次 deep plan**。不要把并行的两条合成一篇。
 - **不重开** D1–D9 和快照 §4。条内只拍实现细节（DDL、文件名、语言）。
+- SQL 命名空间是 schema **`cordis`**（对象如 `cordis.jobs`）。产品/将来的 `CREATE EXTENSION` 仍叫 **pg_cordis**。不要 `CREATE SCHEMA pg_cordis`：PostgreSQL 禁止 `pg_` 前缀。
 - **现在不** `CREATE EXTENSION`，**不**编进 pgembed 认证表。那是核稳定后的发行步，不在 P00–P19 里。
 - **P20** 是数据分析另轮，不挡编码 agent v0。
 

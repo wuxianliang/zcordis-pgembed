@@ -3,7 +3,9 @@
 Date: 2026-08-23
 Reviewed plan: `docs/plans/P00-sql-source-2026-08-23.md`
 Baseline: `prompt-exports/oracle-plan-2026-08-23-155824-p00-sql-tree-deep-pl-bc76.md`（第 104 行 `# P00: Canonical SQL source tree and apply path` 起为计划正文）
-Folded answers (not reopened): Q1 schema `pg_cordis`；Q2 `da_agent` / `cordis_p00` 分库共 PGDATA；Q3 本仓新增 `pyproject.toml`（覆盖导出的"借 pg-agent uv"默认）。
+Folded answers (not reopened): Q1 dedicated schema；Q2 `da_agent` / `cordis_p00` 分库共 PGDATA；Q3 本仓新增 `pyproject.toml`（覆盖导出的"借 pg-agent uv"默认）。
+
+实现注：Q1 的 SQL schema 是 **`cordis`**，不是 `pg_cordis`（PostgreSQL 保留 `pg_` 前缀）。
 
 ## 范围与方法
 
