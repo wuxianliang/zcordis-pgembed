@@ -90,6 +90,123 @@ def strip_sql_comments(text: str) -> str:
     return "\n".join(lines)
 
 
+def _blank_span(text: str, start: int, end: int) -> str:
+    return "".join("\n" if ch == "\n" else " " for ch in text[start:end])
+
+
+def _is_ident_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def _dollar_tag_at(text: str, i: int) -> str | None:
+    if i >= len(text) or text[i] != "$":
+        return None
+    j = i + 1
+    while j < len(text) and _is_ident_char(text[j]):
+        j += 1
+    if j < len(text) and text[j] == "$":
+        return text[i + 1 : j]
+    return None
+
+
+def sanitize_sql_for_preflight(text: str) -> str:
+    """Blank comments and quoted spans while preserving newlines.
+
+    Dollar-quote and string delimiters are recognized only in SQL state so a
+    lookalike inside a single-quoted literal cannot hide top-level COMMIT.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if ch == "-" and nxt == "-":
+            j = i
+            while j < n and text[j] != "\n":
+                j += 1
+            out.append(_blank_span(text, i, j))
+            i = j
+            continue
+        if ch == "/" and nxt == "*":
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if text[j] == "/" and j + 1 < n and text[j + 1] == "*":
+                    depth += 1
+                    j += 2
+                    continue
+                if text[j] == "*" and j + 1 < n and text[j + 1] == "/":
+                    depth -= 1
+                    j += 2
+                    continue
+                j += 1
+            out.append(_blank_span(text, i, j))
+            i = j
+            continue
+        if (
+            ch in "Ee"
+            and nxt == "'"
+            and (i == 0 or not _is_ident_char(text[i - 1]))
+        ):
+            j = i + 2
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == "'":
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(_blank_span(text, i, j))
+            i = j
+            continue
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                if text[j] == "'":
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(_blank_span(text, i, j))
+            i = j
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if text[j] == '"':
+                    if j + 1 < n and text[j + 1] == '"':
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(_blank_span(text, i, j))
+            i = j
+            continue
+        tag = _dollar_tag_at(text, i)
+        if tag is not None:
+            closer = f"${tag}$"
+            k = text.find(closer, i + len(closer))
+            end = n if k == -1 else k + len(closer)
+            out.append(_blank_span(text, i, end))
+            i = end
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def strip_sql_dollar_quotes(text: str) -> str:
+    return sanitize_sql_for_preflight(text)
+
+
 def preflight_sql(path: Path, body: str) -> None:
     for lineno, line in enumerate(body.splitlines(), start=1):
         if line.lstrip().startswith("\\"):
@@ -97,7 +214,7 @@ def preflight_sql(path: Path, body: str) -> None:
                 f"{path.name}:{lineno}: psql meta-commands are forbidden",
                 2,
             )
-    scanned = strip_sql_comments(body)
+    scanned = sanitize_sql_for_preflight(body)
     for pattern in FORBIDDEN_STMTS:
         if pattern.search(scanned):
             raise ApplyError(

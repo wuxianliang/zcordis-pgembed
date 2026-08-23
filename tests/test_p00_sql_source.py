@@ -3,58 +3,35 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 from pgembed import POSTGRES_BIN_PATH, get_server
 
-REPO = Path(__file__).resolve().parents[1]
-APPLY = REPO / "tools" / "apply_pg_cordis.py"
-SQL = REPO / "sql"
+from tests.conftest import (
+    REPO,
+    SQL,
+    load_apply_module,
+    next_sql_prefix,
+    psql,
+    run_apply,
+)
+
+P01_FUNCTIONS = (
+    "cordis.claim_job",
+    "cordis.complete_claim",
+    "cordis.fail_claim",
+    "cordis.get_schema_version",
+    "cordis.release_stale",
+    "cordis.renew_claim",
+    "cordis.yield_claim",
+)
 
 
-def run_apply(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    merged = os.environ.copy()
-    if env:
-        merged.update(env)
-    return subprocess.run(
-        [sys.executable, str(APPLY), *args],
-        cwd=str(REPO),
-        capture_output=True,
-        text=True,
-        check=False,
-        env=merged,
-    )
-
-
-def psql(server, database: str, sql: str, *extra: str) -> str:
-    args = [
-        str(POSTGRES_BIN_PATH / "psql"),
-        server.get_uri(database),
-        "--no-psqlrc",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-q",
-        "-t",
-        "-A",
-        *extra,
-    ]
-    proc = subprocess.run(args, input=sql.encode(), capture_output=True, check=False)
-    out = proc.stdout.decode() + proc.stderr.decode()
-    if proc.returncode != 0:
-        raise RuntimeError(f"psql failed ({proc.returncode}):\n{out}")
-    return out.strip()
-
-
-@pytest.fixture(scope="session")
-def pgdata(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("pgdata")
-
-
-def test_fresh_apply_lists_kernel_and_p00(pgdata: Path) -> None:
+def test_fresh_apply_lists_current_tree_and_p01(pgdata: Path) -> None:
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -64,12 +41,22 @@ def test_fresh_apply_lists_kernel_and_p00(pgdata: Path) -> None:
     )
     combined = result.stdout + result.stderr
     assert result.returncode == 0, combined
-    assert "files=0000_kernel.sql" in result.stdout
+    assert "files=0000_kernel.sql,0001_p01_claim.sql" in result.stdout
     assert "mode=reset" in result.stdout
     assert "bootstrap verification ok" in result.stdout
 
     server = get_server(pgdata)
-    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p00"
+    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p01"
+    assert (
+        psql(
+            server,
+            "cordis_p00",
+            "SELECT COUNT(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'cordis' AND c.relname = 'jobs';",
+        )
+        == "1"
+    )
     assert (
         psql(
             server,
@@ -77,7 +64,7 @@ def test_fresh_apply_lists_kernel_and_p00(pgdata: Path) -> None:
             "SELECT COUNT(*) FROM pg_class c "
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "WHERE n.nspname = 'cordis' AND c.relname IN "
-            "('jobs','agent_steps','run_waits','run_events');",
+            "('agent_steps','run_waits','run_events');",
         )
         == "0"
     )
@@ -89,22 +76,20 @@ def test_fresh_apply_lists_kernel_and_p00(pgdata: Path) -> None:
         )
         == "0"
     )
-    assert (
-        psql(
-            server,
-            "cordis_p00",
-            "SELECT n.nspname || '.' || p.proname FROM pg_proc p "
-            "JOIN pg_namespace n ON n.oid = p.pronamespace "
-            "WHERE n.nspname = 'cordis' ORDER BY 1;",
-        )
-        == "cordis.get_schema_version"
-    )
+    names = psql(
+        server,
+        "cordis_p00",
+        "SELECT n.nspname || '.' || p.proname FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'cordis' ORDER BY 1;",
+    ).splitlines()
+    assert names == list(P01_FUNCTIONS)
     assert (
         psql(
             server,
             "cordis_p00",
             "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname IN ('cordis','public') AND c.relkind = 'r' "
+            "WHERE n.nspname = 'public' AND c.relkind = 'r' "
             "AND c.relname NOT LIKE 'pg_%';",
         )
         == "0"
@@ -145,7 +130,9 @@ def test_numbered_file_extension_without_loader_change(
 ) -> None:
     tree = tmp_path / "sql"
     shutil.copytree(SQL, tree)
-    (tree / "0001_p01_probe.sql").write_text(
+    prefix = next_sql_prefix(tree)
+    probe_name = f"{prefix}_test_probe.sql"
+    (tree / probe_name).write_text(
         "CREATE OR REPLACE FUNCTION cordis.p00_probe()\n"
         "RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'probe'::text; $$;\n"
     )
@@ -159,16 +146,19 @@ def test_numbered_file_extension_without_loader_change(
         "--reset",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "files=0000_kernel.sql,0001_p01_probe.sql" in result.stdout
+    assert (
+        f"files=0000_kernel.sql,0001_p01_claim.sql,{probe_name}" in result.stdout
+    )
     server = get_server(pgdata)
     assert psql(server, "cordis_p00_probe", "SELECT cordis.p00_probe();") == "probe"
-    assert not (SQL / "0001_p01_probe.sql").exists()
+    assert not (SQL / probe_name).exists()
 
 
 def test_preflight_allows_later_cordis_table(pgdata: Path, tmp_path: Path) -> None:
     tree = tmp_path / "sql_table"
     shutil.copytree(SQL, tree)
-    (tree / "0001_p01_table.sql").write_text(
+    prefix = next_sql_prefix(tree)
+    (tree / f"{prefix}_p00_allowed.sql").write_text(
         "CREATE TABLE IF NOT EXISTS cordis.p00_allowed (id int PRIMARY KEY);\n"
     )
     result = run_apply(
@@ -183,6 +173,75 @@ def test_preflight_allows_later_cordis_table(pgdata: Path, tmp_path: Path) -> No
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_plpgsql_end_inside_dollar_quotes_applies(
+    pgdata: Path, tmp_path: Path
+) -> None:
+    tree = tmp_path / "sql_plpgsql"
+    shutil.copytree(SQL, tree)
+    prefix = next_sql_prefix(tree)
+    (tree / f"{prefix}_plpgsql_end.sql").write_text(
+        "CREATE OR REPLACE FUNCTION cordis.p01_plpgsql_probe()\n"
+        "RETURNS text\n"
+        "LANGUAGE plpgsql\n"
+        "AS $fn$\n"
+        "BEGIN\n"
+        "  RETURN 'ok';\n"
+        "END;\n"
+        "$fn$;\n"
+    )
+    result = run_apply(
+        "--pgdata",
+        str(pgdata),
+        "--database",
+        "cordis_p01_plpgsql",
+        "--sql-root",
+        str(tree),
+        "--reset",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    server = get_server(pgdata)
+    assert (
+        psql(server, "cordis_p01_plpgsql", "SELECT cordis.p01_plpgsql_probe();")
+        == "ok"
+    )
+
+
+@pytest.mark.parametrize(
+    "stmt,db",
+    [
+        ("BEGIN;", "cordis_bad_begin"),
+        ("COMMIT;", "cordis_bad_commit"),
+        ("ROLLBACK;", "cordis_bad_rollback"),
+        ("END;", "cordis_bad_end"),
+        ("START TRANSACTION;", "cordis_bad_start"),
+    ],
+)
+def test_top_level_transaction_control_exits_2(
+    pgdata: Path, tmp_path: Path, stmt: str, db: str
+) -> None:
+    assert run_apply("--pgdata", str(pgdata), "--database", "cordis_p00").returncode == 0
+    tree = tmp_path / db
+    shutil.copytree(SQL, tree)
+    prefix = next_sql_prefix(tree)
+    (tree / f"{prefix}_txn_bad.sql").write_text(f"{stmt}\nSELECT 1;\n")
+    result = run_apply(
+        "--pgdata",
+        str(pgdata),
+        "--database",
+        db,
+        "--sql-root",
+        str(tree),
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    server = get_server(pgdata)
+    found = psql(
+        server,
+        "postgres",
+        f"SELECT COUNT(*) FROM pg_database WHERE datname = '{db}';",
+    )
+    assert found == "0"
+
+
 @pytest.mark.parametrize(
     "mutator,db",
     [
@@ -195,6 +254,7 @@ def test_preflight_allows_later_cordis_table(pgdata: Path, tmp_path: Path) -> No
         ("meta_connect", "cordis_bad_g"),
         ("grant", "cordis_bad_h"),
         ("create_database", "cordis_bad_i"),
+        ("include", "cordis_bad_j"),
     ],
 )
 def test_invalid_tree_exits_2_without_creating_database(
@@ -206,27 +266,34 @@ def test_invalid_tree_exits_2_without_creating_database(
         tree.mkdir()
     else:
         shutil.copytree(SQL, tree)
+        prefix = next_sql_prefix(tree)
         if mutator == "missing_0000":
             (tree / "0000_kernel.sql").unlink()
         elif mutator == "bad_name":
             (tree / "bad.sql").write_text("SELECT 1;\n")
         elif mutator == "hyphen_name":
-            (tree / "0001-p01.sql").write_text("SELECT 1;\n")
+            (tree / f"{prefix}-p01.sql").write_text("SELECT 1;\n")
         elif mutator == "duplicate_prefix":
-            (tree / "0001_first.sql").write_text("SELECT 1;\n")
-            (tree / "0001_second.sql").write_text("SELECT 1;\n")
+            (tree / f"{prefix}_first.sql").write_text("SELECT 1;\n")
+            (tree / f"{prefix}_second.sql").write_text("SELECT 1;\n")
         elif mutator == "nested":
             nested = tree / "migrations"
             nested.mkdir()
-            (nested / "0001.sql").write_text("SELECT 1;\n")
+            (nested / f"{prefix}.sql").write_text("SELECT 1;\n")
         elif mutator == "meta_connect":
-            (tree / "0001_p01_bad.sql").write_text("\\connect postgres\nSELECT 1;\n")
+            (tree / f"{prefix}_p01_bad.sql").write_text(
+                "\\connect postgres\nSELECT 1;\n"
+            )
         elif mutator == "grant":
-            (tree / "0001_p01_bad.sql").write_text(
+            (tree / f"{prefix}_p01_bad.sql").write_text(
                 "GRANT USAGE ON SCHEMA cordis TO PUBLIC;\n"
             )
         elif mutator == "create_database":
-            (tree / "0001_p01_bad.sql").write_text("CREATE DATABASE evil;\n")
+            (tree / f"{prefix}_p01_bad.sql").write_text("CREATE DATABASE evil;\n")
+        elif mutator == "include":
+            (tree / f"{prefix}_p01_bad.sql").write_text(
+                "\\include foo.sql\nSELECT 1;\n"
+            )
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -248,7 +315,8 @@ def test_invalid_tree_exits_2_without_creating_database(
 def test_sql_failure_rolls_back_tree(pgdata: Path, tmp_path: Path) -> None:
     tree = tmp_path / "rollback_sql"
     shutil.copytree(SQL, tree)
-    (tree / "0001_p01_fail.sql").write_text(
+    prefix = next_sql_prefix(tree)
+    (tree / f"{prefix}_p01_fail.sql").write_text(
         "CREATE OR REPLACE FUNCTION cordis.should_not_exist()\n"
         "RETURNS text LANGUAGE sql AS $$ SELECT 'x'::text; $$;\n"
         "SELECT 1 / 0;\n"
@@ -289,27 +357,90 @@ def test_missing_database_flag_exits_2() -> None:
 
 
 def test_sql_tree_has_no_forbidden_tokens() -> None:
+    apply_mod = load_apply_module()
+    create_table_re = re.compile(
+        r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[^\s(]+)",
+        re.I,
+    )
     for path in SQL.rglob("*.sql"):
-        for line in path.read_text().splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith("--"):
-                continue
-            upper = stripped.upper()
-            assert "CREATE EXTENSION" not in upper, path
-            assert "CREATE TABLE" not in upper, path
-            assert not upper.startswith("GRANT"), path
-            assert not stripped.startswith("\\"), path
+        body = path.read_text()
+        for line in body.splitlines():
+            assert not line.lstrip().startswith("\\"), path
+        scanned = apply_mod.sanitize_sql_for_preflight(body)
+        for pattern in apply_mod.FORBIDDEN_STMTS:
+            assert pattern.search(scanned) is None, (path, pattern.pattern)
+        for match in create_table_re.finditer(scanned):
+            name = match.group("name").strip('"')
+            assert name.lower().startswith("cordis."), path
+
+
+def test_sanitize_keeps_commit_between_string_dollar_lookalikes() -> None:
+    apply_mod = load_apply_module()
+    payload = (
+        "CREATE TABLE cordis.before_commit (id integer);\n"
+        "SELECT '$hide$';\n"
+        "COMMIT;\n"
+        "SELECT '$hide$';\n"
+        "SELECT 1 / 0;\n"
+    )
+    scanned = apply_mod.sanitize_sql_for_preflight(payload)
+    assert re.search(r"(?:^|;)\s*COMMIT\s*;", scanned, re.I | re.M)
+    e_payload = (
+        "SELECT E'$hide$';\n"
+        "COMMIT;\n"
+        "SELECT E'$hide$';\n"
+    )
+    e_scanned = apply_mod.sanitize_sql_for_preflight(e_payload)
+    assert re.search(r"(?:^|;)\s*COMMIT\s*;", e_scanned, re.I | re.M)
+
+
+def test_string_dollar_lookalike_cannot_hide_commit(
+    pgdata: Path, tmp_path: Path
+) -> None:
+    assert run_apply("--pgdata", str(pgdata), "--database", "cordis_p00").returncode == 0
+    tree = tmp_path / "hide_commit"
+    shutil.copytree(SQL, tree)
+    prefix = next_sql_prefix(tree)
+    (tree / f"{prefix}_hide_commit.sql").write_text(
+        "CREATE TABLE cordis.before_commit (id integer);\n"
+        "SELECT '$hide$';\n"
+        "COMMIT;\n"
+        "SELECT '$hide$';\n"
+        "SELECT 1 / 0;\n"
+    )
+    result = run_apply(
+        "--pgdata",
+        str(pgdata),
+        "--database",
+        "cordis_hide_commit",
+        "--sql-root",
+        str(tree),
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    server = get_server(pgdata)
+    found = psql(
+        server,
+        "postgres",
+        "SELECT COUNT(*) FROM pg_database WHERE datname = 'cordis_hide_commit';",
+    )
+    assert found == "0"
 
 
 @pytest.mark.skipif(
     not (
         Path(os.environ.get("PG_AGENT_ROOT", REPO.parent / "pg-agent")).is_dir()
-        and (Path(os.environ.get("PG_AGENT_ROOT", REPO.parent / "pg-agent")) / "v2" / "setup_db.py").is_file()
+        and (
+            Path(os.environ.get("PG_AGENT_ROOT", REPO.parent / "pg-agent"))
+            / "v2"
+            / "setup_db.py"
+        ).is_file()
     ),
     reason="pg-agent checkout not available",
 )
 def test_pg_agent_separate_database_composition() -> None:
-    agent_root = Path(os.environ.get("PG_AGENT_ROOT", REPO.parent / "pg-agent")).resolve()
+    agent_root = Path(
+        os.environ.get("PG_AGENT_ROOT", REPO.parent / "pg-agent")
+    ).resolve()
     agent_pgdata = agent_root / ".pgdata"
     db = "cordis_p00_comp"
     setup = subprocess.run(
@@ -330,7 +461,16 @@ def test_pg_agent_separate_database_composition() -> None:
             "--reset",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p00"
+        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p01"
+        assert (
+            psql(
+                server,
+                db,
+                "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'cordis' AND c.relname = 'jobs';",
+            )
+            == "1"
+        )
         assert (
             psql(
                 server,
