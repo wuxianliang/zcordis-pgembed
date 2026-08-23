@@ -20,18 +20,24 @@ from tests.conftest import (
     run_apply,
 )
 
-P01_FUNCTIONS = (
+KERNEL_FUNCTIONS = (
+    "cordis.checkpoint",
     "cordis.claim_job",
     "cordis.complete_claim",
+    "cordis.emit_step",
+    "cordis.emit_step_claimed",
     "cordis.fail_claim",
     "cordis.get_schema_version",
+    "cordis.llm_checkpoint",
+    "cordis.next_step_name",
     "cordis.release_stale",
     "cordis.renew_claim",
+    "cordis.run_state",
     "cordis.yield_claim",
 )
 
 
-def test_fresh_apply_lists_current_tree_and_p01(pgdata: Path) -> None:
+def test_fresh_apply_lists_current_tree_and_p02(pgdata: Path) -> None:
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -41,12 +47,15 @@ def test_fresh_apply_lists_current_tree_and_p01(pgdata: Path) -> None:
     )
     combined = result.stdout + result.stderr
     assert result.returncode == 0, combined
-    assert "files=0000_kernel.sql,0001_p01_claim.sql" in result.stdout
+    assert (
+        "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql"
+        in result.stdout
+    )
     assert "mode=reset" in result.stdout
     assert "bootstrap verification ok" in result.stdout
 
     server = get_server(pgdata)
-    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p01"
+    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p02"
     assert (
         psql(
             server,
@@ -63,8 +72,18 @@ def test_fresh_apply_lists_current_tree_and_p01(pgdata: Path) -> None:
             "cordis_p00",
             "SELECT COUNT(*) FROM pg_class c "
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'cordis' AND c.relname = 'agent_steps';",
+        )
+        == "1"
+    )
+    assert (
+        psql(
+            server,
+            "cordis_p00",
+            "SELECT COUNT(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "WHERE n.nspname = 'cordis' AND c.relname IN "
-            "('agent_steps','run_waits','run_events');",
+            "('run_waits','run_events');",
         )
         == "0"
     )
@@ -83,7 +102,7 @@ def test_fresh_apply_lists_current_tree_and_p01(pgdata: Path) -> None:
         "JOIN pg_namespace n ON n.oid = p.pronamespace "
         "WHERE n.nspname = 'cordis' ORDER BY 1;",
     ).splitlines()
-    assert names == list(P01_FUNCTIONS)
+    assert names == list(KERNEL_FUNCTIONS)
     assert (
         psql(
             server,
@@ -147,7 +166,8 @@ def test_numbered_file_extension_without_loader_change(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
-        f"files=0000_kernel.sql,0001_p01_claim.sql,{probe_name}" in result.stdout
+        f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,{probe_name}"
+        in result.stdout
     )
     server = get_server(pgdata)
     assert psql(server, "cordis_p00_probe", "SELECT cordis.p00_probe();") == "probe"
@@ -461,13 +481,22 @@ def test_pg_agent_separate_database_composition() -> None:
             "--reset",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p01"
+        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p02"
         assert (
             psql(
                 server,
                 db,
                 "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
                 "WHERE n.nspname = 'cordis' AND c.relname = 'jobs';",
+            )
+            == "1"
+        )
+        assert (
+            psql(
+                server,
+                db,
+                "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'cordis' AND c.relname = 'agent_steps';",
             )
             == "1"
         )

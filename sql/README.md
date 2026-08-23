@@ -36,7 +36,15 @@ Every numbered file must be:
 
 ## Namespace
 
-P00 creates schema `cordis` and `cordis.get_schema_version() → text`. The P00-only tree returns `p00`. This is an install marker, not agent runtime state.
+P00 creates schema `cordis` and `cordis.get_schema_version() → text`. This is an install marker, not agent runtime state. The latest numbered file wins:
+
+```text
+0000-only tree                  → p00
+tree through 0001_p01_claim.sql → p01
+tree including 0002_p02_log.sql → p02  (current product tree)
+```
+
+`0002` adds `cordis.agent_steps` as the append-only history source of truth. Checkpoint is a log append (claim-fenced when `cordis.jobs` exists), not a `c_*` table. P02 does not create `agent_runs` or public objects.
 
 The product is still called pg_cordis. PostgreSQL rejects schema names with the `pg_` prefix (`unacceptable schema name "pg_cordis"`), so the SQL namespace is `cordis`.
 
