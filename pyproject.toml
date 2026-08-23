@@ -1,0 +1,20 @@
+[project]
+name = "pg-cordis"
+version = "0.0.0"
+description = "pg_cordis SQL source tree and apply command"
+requires-python = ">=3.12"
+dependencies = [
+    "pgembed>=0.3.0rc1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+prerelease = "allow"
+package = false
+
+[tool.uv.sources]
+pgembed = { path = "../pgembed", editable = true }

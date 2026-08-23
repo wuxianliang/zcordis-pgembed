@@ -1,0 +1,7 @@
+.pgdata/
+.venv/
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+.claude/
