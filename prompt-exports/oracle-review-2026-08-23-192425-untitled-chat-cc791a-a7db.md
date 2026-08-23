@@ -1,0 +1,5 @@
+# Oracle Review
+
+
+
+The current `AGENTS.md` establishes six compact work rules and a mandatory per-P completion gate requiring an Oracle `mode:"review"` result with no P0 or open P1 before an immediate P-only commit and push. The Round 2 issues are resolved: the transition accurately grandfathers landed P00–P02 at `709fea1` (`AGENTS.md:39`), both pre-review and pre-push checks cover commits ahead of the relevant upstream as well as the worktree (`AGENTS.md:55-56`, `AGENTS.md:89-97`), and conflicts with either the signed contract or frozen snapshot §4 now have the same owner-decision and explicit Oracle-closure path (`AGENTS.md:23`, `AGENTS.md:66-67`). The schema, append-only SQL policy, test-harness guidance, sibling-repository boundary, review-note sequencing, and pass definition agree with the selected sources. **Verdict: PASS — no P0 and no open P1 findings.**
