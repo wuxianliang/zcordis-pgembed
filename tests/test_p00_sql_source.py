@@ -21,6 +21,7 @@ from tests.conftest import (
 )
 
 KERNEL_FUNCTIONS = (
+    "cordis._validate_plugin_definition",
     "cordis.checkpoint",
     "cordis.claim_job",
     "cordis.complete_claim",
@@ -30,14 +31,17 @@ KERNEL_FUNCTIONS = (
     "cordis.get_schema_version",
     "cordis.llm_checkpoint",
     "cordis.next_step_name",
+    "cordis.refresh_plugins",
+    "cordis.register_host_plugin",
     "cordis.release_stale",
     "cordis.renew_claim",
     "cordis.run_state",
+    "cordis.unregister_host_plugin",
     "cordis.yield_claim",
 )
 
 
-def test_fresh_apply_lists_current_tree_and_p02(pgdata: Path) -> None:
+def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -48,14 +52,15 @@ def test_fresh_apply_lists_current_tree_and_p02(pgdata: Path) -> None:
     combined = result.stdout + result.stderr
     assert result.returncode == 0, combined
     assert (
-        "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql"
+        "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
+        "0006_p06_plugin_catalog.sql"
         in result.stdout
     )
     assert "mode=reset" in result.stdout
     assert "bootstrap verification ok" in result.stdout
 
     server = get_server(pgdata)
-    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p02"
+    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p06"
     assert (
         psql(
             server,
@@ -75,6 +80,17 @@ def test_fresh_apply_lists_current_tree_and_p02(pgdata: Path) -> None:
             "WHERE n.nspname = 'cordis' AND c.relname = 'agent_steps';",
         )
         == "1"
+    )
+    assert (
+        psql(
+            server,
+            "cordis_p00",
+            "SELECT COUNT(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'cordis' AND c.relkind = 'r' AND c.relname IN "
+            "('plugin_catalog','host_plugin_definitions');",
+        )
+        == "2"
     )
     assert (
         psql(
@@ -166,7 +182,8 @@ def test_numbered_file_extension_without_loader_change(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
-        f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,{probe_name}"
+        f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
+        f"0006_p06_plugin_catalog.sql,{probe_name}"
         in result.stdout
     )
     server = get_server(pgdata)
@@ -481,7 +498,7 @@ def test_pg_agent_separate_database_composition() -> None:
             "--reset",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p02"
+        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p06"
         assert (
             psql(
                 server,

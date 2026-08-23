@@ -41,10 +41,31 @@ P00 creates schema `cordis` and `cordis.get_schema_version() → text`. This is 
 ```text
 0000-only tree                  → p00
 tree through 0001_p01_claim.sql → p01
-tree including 0002_p02_log.sql → p02  (current product tree)
+tree through 0002_p02_log.sql   → p02
+tree including 0006_p06_plugin_catalog.sql → p06  (current product tree)
 ```
 
 `0002` adds `cordis.agent_steps` as the append-only history source of truth. Checkpoint is a log append (claim-fenced when `cordis.jobs` exists), not a `c_*` table. P02 does not create `agent_runs` or public objects.
+
+`0006` adds `cordis.plugin_catalog` (compiled) and `cordis.host_plugin_definitions` (host source). In-database plugins author via `COMMENT` JSON on `cordis` functions; host tools use `cordis.register_host_plugin(jsonb)`. `cordis.refresh_plugins()` validates all candidates then `DELETE`+inserts the compiled catalog. After P06, `COMMENT` on `cordis` functions must not start with `{` unless it is a `cordis_plugin` definition. Put GRANT/END words in dollar-quoted function bodies, not in bare SQL.
+
+Envelope (both COMMENT and host registration):
+
+```json
+{
+  "cordis_plugin": {
+    "identity": "host.worktree.apply_edits",
+    "version": "0.1.0",
+    "locus": "host",
+    "invocation": "host_tool",
+    "effect_class": "external",
+    "retry_class": "idempotent",
+    "reconciliation": "operation_key"
+  }
+}
+```
+
+Required: `identity`, `version`, `locus` (`in-db`|`host`), `invocation` (`queue`|`session_select`|`host_tool`), `effect_class`, `retry_class`, `reconciliation`. Legal pairs: in-db+queue, in-db+session_select, host+host_tool. `required_grants` is kinds only: `run` / `named_corpus` / `event` (no `named_corpus:<id>`). Optional DSH fields `inject` / `provide` / `intercept` / `capability` / `session_scope` / `config` are declarative metadata, never executed. Defaults when omitted: `name`→identity, `description`→name, `session_scope`→`run`, empty grants/inject/provide/capability/config objects or arrays as in the plan. JSON `null` for `capability` is rejected.
 
 The product is still called pg_cordis. PostgreSQL rejects schema names with the `pg_` prefix (`unacceptable schema name "pg_cordis"`), so the SQL namespace is `cordis`.
 
