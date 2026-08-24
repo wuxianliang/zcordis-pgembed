@@ -22,9 +22,11 @@ from tests.conftest import (
 
 KERNEL_FUNCTIONS = (
     "cordis._validate_plugin_definition",
+    "cordis.await_event",
     "cordis.checkpoint",
     "cordis.claim_job",
     "cordis.complete_claim",
+    "cordis.emit_event",
     "cordis.emit_step",
     "cordis.emit_step_claimed",
     "cordis.fail_claim",
@@ -53,7 +55,7 @@ def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
     assert result.returncode == 0, combined
     assert (
         "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        "0006_p06_plugin_catalog.sql"
+        "0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql"
         in result.stdout
     )
     assert "mode=reset" in result.stdout
@@ -101,7 +103,7 @@ def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
             "WHERE n.nspname = 'cordis' AND c.relname IN "
             "('run_waits','run_events');",
         )
-        == "0"
+        == "2"
     )
     assert (
         psql(
@@ -183,7 +185,7 @@ def test_numbered_file_extension_without_loader_change(
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
         f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        f"0006_p06_plugin_catalog.sql,{probe_name}"
+        f"0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,{probe_name}"
         in result.stdout
     )
     server = get_server(pgdata)

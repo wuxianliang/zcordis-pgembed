@@ -592,7 +592,7 @@ def test_p02_kind_and_step_name_checks(pgdata: Path) -> None:
                 "JOIN pg_namespace n ON n.oid = c.relnamespace "
                 f"WHERE n.nspname = 'cordis' AND c.relname = '{rel}';",
             )
-            == "0"
+            == "1"
         )
 
 
