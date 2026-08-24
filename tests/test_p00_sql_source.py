@@ -34,6 +34,7 @@ KERNEL_FUNCTIONS = (
     "cordis.emit_step_claimed",
     "cordis.fail_claim",
     "cordis.get_schema_version",
+    "cordis.invoke_llm",
     "cordis.issue_grant",
     "cordis.llm_checkpoint",
     "cordis.next_step_name",
@@ -47,6 +48,7 @@ KERNEL_FUNCTIONS = (
     "cordis.run_state",
     "cordis.slice_has_grant",
     "cordis.slice_live_grants",
+    "cordis.step_once",
     "cordis.unregister_host_plugin",
     "cordis.yield_claim",
 )
@@ -64,8 +66,8 @@ def test_fresh_apply_lists_current_tree_and_p07(pgdata: Path) -> None:
     assert result.returncode == 0, combined
     assert (
         "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        "0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,"
-        "0007_p07_grant_registry.sql"
+        "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+        "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql"
         in result.stdout
     )
     assert "mode=reset" in result.stdout
@@ -206,8 +208,8 @@ def test_numbered_file_extension_without_loader_change(
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
         f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        f"0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,"
-        f"0007_p07_grant_registry.sql,{probe_name}"
+        f"0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+        f"0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,{probe_name}"
         in result.stdout
     )
     server = get_server(pgdata)
