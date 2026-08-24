@@ -22,28 +22,37 @@ from tests.conftest import (
 
 KERNEL_FUNCTIONS = (
     "cordis._validate_plugin_definition",
+    "cordis.approve_grant",
     "cordis.await_event",
     "cordis.checkpoint",
     "cordis.claim_job",
     "cordis.complete_claim",
+    "cordis.create_slice",
+    "cordis.deny_grant",
     "cordis.emit_event",
     "cordis.emit_step",
     "cordis.emit_step_claimed",
     "cordis.fail_claim",
     "cordis.get_schema_version",
+    "cordis.issue_grant",
     "cordis.llm_checkpoint",
     "cordis.next_step_name",
     "cordis.refresh_plugins",
     "cordis.register_host_plugin",
+    "cordis.register_named_corpus",
     "cordis.release_stale",
     "cordis.renew_claim",
+    "cordis.request_grant",
+    "cordis.revoke_grant",
     "cordis.run_state",
+    "cordis.slice_has_grant",
+    "cordis.slice_live_grants",
     "cordis.unregister_host_plugin",
     "cordis.yield_claim",
 )
 
 
-def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
+def test_fresh_apply_lists_current_tree_and_p07(pgdata: Path) -> None:
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -55,14 +64,15 @@ def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
     assert result.returncode == 0, combined
     assert (
         "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        "0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql"
+        "0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,"
+        "0007_p07_grant_registry.sql"
         in result.stdout
     )
     assert "mode=reset" in result.stdout
     assert "bootstrap verification ok" in result.stdout
 
     server = get_server(pgdata)
-    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p06"
+    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p07"
     assert (
         psql(
             server,
@@ -93,6 +103,17 @@ def test_fresh_apply_lists_current_tree_and_p06(pgdata: Path) -> None:
             "('plugin_catalog','host_plugin_definitions');",
         )
         == "2"
+    )
+    assert (
+        psql(
+            server,
+            "cordis_p00",
+            "SELECT COUNT(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'cordis' AND c.relkind = 'r' AND c.relname IN "
+            "('named_corpora','slices','grants');",
+        )
+        == "3"
     )
     assert (
         psql(
@@ -185,7 +206,8 @@ def test_numbered_file_extension_without_loader_change(
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
         f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        f"0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,{probe_name}"
+        f"0003_p03_wait_event.sql,0006_p06_plugin_catalog.sql,"
+        f"0007_p07_grant_registry.sql,{probe_name}"
         in result.stdout
     )
     server = get_server(pgdata)
@@ -500,7 +522,7 @@ def test_pg_agent_separate_database_composition() -> None:
             "--reset",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p06"
+        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p07"
         assert (
             psql(
                 server,
