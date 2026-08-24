@@ -45,14 +45,15 @@ tree through 0002_p02_log.sql   → p02
 tree through 0003_p03_wait_event.sql → p03
 tree through 0005_p05_one_step_driver.sql → p05
 tree including 0006_p06_plugin_catalog.sql → p06
-tree including 0007_p07_grant_registry.sql → p07  (current product tree)
+tree including 0007_p07_grant_registry.sql → p07
+tree including 0019_p19_paradigm_policies.sql → p19  (current product tree)
 ```
 
 `0002` adds `cordis.agent_steps` as the append-only history source of truth. Checkpoint is a log append (claim-fenced when `cordis.jobs` exists), not a `c_*` table. P02 does not create `agent_runs` or public objects.
 
 `0003` adds kernel side tables `cordis.run_events` and `cordis.run_waits` plus `cordis.await_event` / `cordis.emit_event`. They serve the existing `cordis.jobs` row (status `WAITING`); they are not a second queue and not payload history. `run_events.payload` is a first-write fence (`SQL NULL` = not emitted). Canonical `event/emit` rows live on an internal `@event/<uuid>` log stream, which is not a jobs row. A tree that ends at `0003` reports `p03`.
 
-`0005` adds the paradigm-neutral driver `cordis.step_once` and a replaceable SQL mock hook `cordis.invoke_llm`. One live claim processes at most one named step `s-N` (LLM checkpoint or mock invocation, then one mock tool observation or a final answer) and returns a text outcome. The caller maps yield / complete / fail through P01 claim verbs; P05 does not change jobs status, enqueue work, dispatch plugins, wait, retry, run a worker loop, or perform HTTP. Provider key is `md5(run_id || '/' || step_name)`. A tree that ends at `0005` reports `p05`; a tree that ends at `0006` reports `p06`; the current product tree ends at `0007` and reports `p07`.
+`0005` adds the paradigm-neutral driver `cordis.step_once` and a replaceable SQL mock hook `cordis.invoke_llm`. One live claim processes at most one named step `s-N` (LLM checkpoint or mock invocation, then one mock tool observation or a final answer) and returns a text outcome. The caller maps yield / complete / fail through P01 claim verbs; P05 does not change jobs status, enqueue work, dispatch plugins, wait, retry, run a worker loop, or perform HTTP. Provider key is `md5(run_id || '/' || step_name)`. A tree that ends at `0005` reports `p05`; a tree that ends at `0006` reports `p06`; a tree that ends at `0007` reports `p07`; the current product tree ends at `0019` and reports `p19`.
 
 `0006` adds `cordis.plugin_catalog` (compiled) and `cordis.host_plugin_definitions` (host source). In-database plugins author via `COMMENT` JSON on `cordis` functions; host tools use `cordis.register_host_plugin(jsonb)`. `cordis.refresh_plugins()` validates all candidates then `DELETE`+inserts the compiled catalog. After P06, `COMMENT` on `cordis` functions must not start with `{` unless it is a `cordis_plugin` definition. Put GRANT/END words in dollar-quoted function bodies, not in bare SQL.
 
@@ -75,6 +76,8 @@ Envelope (both COMMENT and host registration):
 Required: `identity`, `version`, `locus` (`in-db`|`host`), `invocation` (`queue`|`session_select`|`host_tool`), `effect_class`, `retry_class`, `reconciliation`. Legal pairs: in-db+queue, in-db+session_select, host+host_tool. `required_grants` is kinds only: `run` / `named_corpus` / `event` (no `named_corpus:<id>`). Optional DSH fields `inject` / `provide` / `intercept` / `capability` / `session_scope` / `config` are declarative metadata, never executed. Defaults when omitted: `name`→identity, `description`→name, `session_scope`→`run`, empty grants/inject/provide/capability/config objects or arrays as in the plan. JSON `null` for `capability` is rejected.
 
 `0007` adds `cordis.named_corpora`, `cordis.slices`, and `cordis.grants`. Live rights are slice-bound D5 enums (`run` / `named_corpus:<id>` / `event:<scope>`). The model-facing writer is `cordis.request_grant` (never writes `issued`). Issue-family writers reject asserted `issuer_kind='model'` (provenance, not authentication). `named_corpus` is a live-root identity. A tree that ends at `0007` reports `p07`.
+
+`0019` adds `cordis.paradigm_policies`, seeds `codeact` / `rlm`, six slot stubs, and `cordis.apply_observation_policy`. Lookup is `cordis.paradigm_policy(text)`. These rows are loop policy, not plugin-catalog tools. Real slot bodies, if any, belong in a later numbered file `> 0019`.
 
 The product is still called pg_cordis. PostgreSQL rejects schema names with the `pg_` prefix (`unacceptable schema name "pg_cordis"`), so the SQL namespace is `cordis`.
 

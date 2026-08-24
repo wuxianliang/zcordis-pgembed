@@ -21,7 +21,9 @@ from tests.conftest import (
 )
 
 KERNEL_FUNCTIONS = (
+    "cordis._validate_paradigm_policy",
     "cordis._validate_plugin_definition",
+    "cordis.apply_observation_policy",
     "cordis.approve_grant",
     "cordis.await_event",
     "cordis.checkpoint",
@@ -33,14 +35,22 @@ KERNEL_FUNCTIONS = (
     "cordis.emit_step",
     "cordis.emit_step_claimed",
     "cordis.fail_claim",
+    "cordis.fold_codeact_messages",
+    "cordis.fold_rlm_messages",
     "cordis.get_schema_version",
     "cordis.invoke_llm",
     "cordis.issue_grant",
     "cordis.llm_checkpoint",
     "cordis.next_step_name",
+    "cordis.observe_codeact",
+    "cordis.observe_rlm",
+    "cordis.paradigm_policy",
+    "cordis.parse_codeact_decision",
+    "cordis.parse_rlm_decision",
     "cordis.refresh_plugins",
     "cordis.register_host_plugin",
     "cordis.register_named_corpus",
+    "cordis.register_paradigm_policy",
     "cordis.release_stale",
     "cordis.renew_claim",
     "cordis.request_grant",
@@ -50,11 +60,12 @@ KERNEL_FUNCTIONS = (
     "cordis.slice_live_grants",
     "cordis.step_once",
     "cordis.unregister_host_plugin",
+    "cordis.unregister_paradigm_policy",
     "cordis.yield_claim",
 )
 
 
-def test_fresh_apply_lists_current_tree_and_p07(pgdata: Path) -> None:
+def test_fresh_apply_lists_current_tree_and_p19(pgdata: Path) -> None:
     result = run_apply(
         "--pgdata",
         str(pgdata),
@@ -67,14 +78,15 @@ def test_fresh_apply_lists_current_tree_and_p07(pgdata: Path) -> None:
     assert (
         "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
         "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
-        "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql"
+        "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
+        "0019_p19_paradigm_policies.sql"
         in result.stdout
     )
     assert "mode=reset" in result.stdout
     assert "bootstrap verification ok" in result.stdout
 
     server = get_server(pgdata)
-    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p07"
+    assert psql(server, "cordis_p00", "SELECT cordis.get_schema_version();") == "p19"
     assert (
         psql(
             server,
@@ -127,6 +139,16 @@ def test_fresh_apply_lists_current_tree_and_p07(pgdata: Path) -> None:
             "('run_waits','run_events');",
         )
         == "2"
+    )
+    assert (
+        psql(
+            server,
+            "cordis_p00",
+            "SELECT COUNT(*) FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'cordis' AND c.relname = 'paradigm_policies';",
+        )
+        == "1"
     )
     assert (
         psql(
@@ -209,7 +231,8 @@ def test_numbered_file_extension_without_loader_change(
     assert (
         f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
         f"0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
-        f"0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,{probe_name}"
+        f"0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
+        f"0019_p19_paradigm_policies.sql,{probe_name}"
         in result.stdout
     )
     server = get_server(pgdata)
@@ -524,7 +547,7 @@ def test_pg_agent_separate_database_composition() -> None:
             "--reset",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p07"
+        assert psql(server, db, "SELECT cordis.get_schema_version();") == "p19"
         assert (
             psql(
                 server,

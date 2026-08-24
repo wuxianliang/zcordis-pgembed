@@ -212,7 +212,7 @@ def test_in_place_replay_keeps_host_plugin(pgdata: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "mode=in-place" in result.stdout
     assert "bootstrap verification ok" in result.stdout
-    assert psql(server, P06_DB, "SELECT cordis.get_schema_version();") == "p07"
+    assert psql(server, P06_DB, "SELECT cordis.get_schema_version();") == "p19"
     assert (
         psql(
             server,
