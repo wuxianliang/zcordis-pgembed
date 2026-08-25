@@ -334,7 +334,7 @@ def test_p02_emit_step_and_replay(pgdata: Path) -> None:
     )
     replay = run_apply("--pgdata", str(pgdata), "--database", P02_DB)
     assert replay.returncode == 0, replay.stdout + replay.stderr
-    assert psql(server, P02_DB, "SELECT cordis.get_schema_version();") == "p19"
+    assert psql(server, P02_DB, "SELECT cordis.get_schema_version();") == "p20"
     assert (
         psql(
             server,

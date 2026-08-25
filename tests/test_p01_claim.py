@@ -127,7 +127,7 @@ def test_catalog_contract(pgdata: Path) -> None:
         "AND p.pronargs = 0;",
     )
     assert version == "|text"
-    assert psql(server, P01_DB, "SELECT cordis.get_schema_version();") == "p19"
+    assert psql(server, P01_DB, "SELECT cordis.get_schema_version();") == "p20"
 
 
 def test_mutual_exclusion_and_yield_reclaim(pgdata: Path) -> None:
@@ -492,7 +492,7 @@ def test_replay_preserves_jobs_row(pgdata: Path) -> None:
     result = run_apply("--pgdata", str(pgdata), "--database", P01_DB)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "mode=in-place" in result.stdout
-    assert psql(server, P01_DB, "SELECT cordis.get_schema_version();") == "p19"
+    assert psql(server, P01_DB, "SELECT cordis.get_schema_version();") == "p20"
     after = psql(
         server,
         P01_DB,
