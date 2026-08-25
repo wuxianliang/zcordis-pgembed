@@ -1,0 +1,41 @@
+"""Thin host SQL seam for pg_cordis. No import-time I/O."""
+
+from pg_cordis_host.client import (
+    AgentStep,
+    AuthorizedHostTool,
+    AwaitEventResult,
+    CheckpointEvent,
+    ClaimedJob,
+    CordisCommandTimeout,
+    CordisFeatureUnavailable,
+    CordisHostClient,
+    CordisHostError,
+    CordisInputError,
+    CordisProtocolError,
+    CordisSqlError,
+    JobSnapshot,
+    NamedCorpusRef,
+    PluginCatalogEntry,
+    RunState,
+    new_host_worker_id,
+)
+
+__all__ = (
+    "AgentStep",
+    "AuthorizedHostTool",
+    "AwaitEventResult",
+    "CheckpointEvent",
+    "ClaimedJob",
+    "CordisCommandTimeout",
+    "CordisFeatureUnavailable",
+    "CordisHostClient",
+    "CordisHostError",
+    "CordisInputError",
+    "CordisProtocolError",
+    "CordisSqlError",
+    "JobSnapshot",
+    "NamedCorpusRef",
+    "PluginCatalogEntry",
+    "RunState",
+    "new_host_worker_id",
+)
