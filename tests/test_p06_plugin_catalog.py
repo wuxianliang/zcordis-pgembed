@@ -70,7 +70,15 @@ def _catalog_row(server, database: str, identity: str) -> str:
 def test_register_host_plugin_and_select(pgdata: Path) -> None:
     _reset(pgdata)
     server = get_server(pgdata)
-    assert psql(server, P06_DB, "SELECT count(*) FROM cordis.plugin_catalog;") == "0"
+    assert psql(server, P06_DB, "SELECT count(*) FROM cordis.plugin_catalog;") == "1"
+    assert (
+        psql(
+            server,
+            P06_DB,
+            "SELECT identity FROM cordis.plugin_catalog;",
+        )
+        == "kernel.step_once"
+    )
     ident = psql(server, P06_DB, _register_sql(PROOF))
     assert ident == "host.worktree.apply_edits"
     assert (
@@ -122,7 +130,7 @@ def test_register_host_plugin_and_select(pgdata: Path) -> None:
         f"WHERE identity = {_sql_str(ident)};",
     )
     assert json.loads(metadata) == PROOF
-    assert psql(server, P06_DB, "SELECT cordis.refresh_plugins();") == "1"
+    assert psql(server, P06_DB, "SELECT cordis.refresh_plugins();") == "2"
 
 
 def test_comment_refresh_compiles_cordis_function(
@@ -195,7 +203,7 @@ def test_comment_refresh_compiles_cordis_function(
     )
     assert (
         psql(server, "cordis_p06_comment", "SELECT cordis.refresh_plugins();")
-        == "1"
+        == "2"
     )
 
 
@@ -212,7 +220,7 @@ def test_in_place_replay_keeps_host_plugin(pgdata: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "mode=in-place" in result.stdout
     assert "bootstrap verification ok" in result.stdout
-    assert psql(server, P06_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P06_DB, "SELECT cordis.get_schema_version();") == "p21"
     assert (
         psql(
             server,

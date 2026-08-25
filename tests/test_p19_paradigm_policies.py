@@ -109,7 +109,7 @@ def _fail(server, sql: str) -> str:
 def test_p19_fresh_apply_seeds_and_version(pgdata: Path) -> None:
     _reset(pgdata)
     server = get_server(pgdata)
-    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p21"
     assert (
         psql(
             server,
@@ -135,7 +135,7 @@ def test_p19_fresh_apply_seeds_and_version(pgdata: Path) -> None:
     )
     assert (
         psql(server, P19_DB, "SELECT count(*) FROM cordis.plugin_catalog;")
-        == "0"
+        == "1"
     )
     assert (
         psql(
@@ -448,7 +448,7 @@ def test_p19_unregister_and_replay_restores_missing_seed(pgdata: Path) -> None:
     result = run_apply("--pgdata", str(pgdata), "--database", P19_DB)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "mode=in-place" in result.stdout
-    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p21"
     assert (
         psql(
             server,
@@ -666,7 +666,7 @@ def test_p19_higher_file_replaces_stub_and_survives_replay(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     server = get_server(pgdata)
-    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P19_DB, "SELECT cordis.get_schema_version();") == "p21"
     body = json.loads(
         psql(server, P19_DB, "SELECT cordis.fold_codeact_messages('r');")
     )

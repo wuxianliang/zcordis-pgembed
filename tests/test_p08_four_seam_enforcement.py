@@ -17,7 +17,8 @@ TREE_FILES = (
     "0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
     "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
     "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
-    "0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql"
+    "0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql,"
+    "0021_p09_in_db_worker.sql"
 )
 HOST_LOOKUP = {
     "cordis_plugin": {
@@ -189,7 +190,7 @@ def test_p08_fresh_apply_catalog_version_and_ready(pgdata: Path) -> None:
     assert result.returncode == 0, combined
     assert f"files={TREE_FILES}" in result.stdout
     server = get_server(pgdata)
-    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p21"
     assert (
         psql(
             server,
@@ -875,7 +876,7 @@ def test_p08_feature_closed_when_any_seam_is_missing(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     server = get_server(pgdata)
-    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p21"
     status = json.loads(
         psql(
             server,
@@ -998,7 +999,7 @@ def test_p08_replay_preserves_existing_workspace_and_log(pgdata: Path) -> None:
     replay = run_apply("--pgdata", str(pgdata), "--database", P08_DB)
     assert replay.returncode == 0, replay.stdout + replay.stderr
     assert "mode=in-place" in replay.stdout
-    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p20"
+    assert psql(server, P08_DB, "SELECT cordis.get_schema_version();") == "p21"
     after_grant = psql(
         server,
         P08_DB,
