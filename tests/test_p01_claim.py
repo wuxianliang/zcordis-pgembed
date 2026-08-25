@@ -298,6 +298,12 @@ def test_renew_and_transition_fencing(pgdata: Path) -> None:
     fail_id = "p01-fail"
     psql(server, P01_DB, f"DELETE FROM cordis.jobs WHERE run_id = {_sql_str(fail_id)};")
     _insert_pending(server, fail_id)
+    psql(
+        server,
+        P01_DB,
+        "UPDATE cordis.jobs SET max_attempts = 1 "
+        f"WHERE run_id = {_sql_str(fail_id)};",
+    )
     fail_token = psql(
         server,
         P01_DB,
@@ -314,10 +320,16 @@ def test_renew_and_transition_fencing(pgdata: Path) -> None:
     failed = psql(
         server,
         P01_DB,
-        "SELECT status, error->>'reason', completed_at IS NOT NULL "
+        "SELECT status, error->>'reason', error#>>'{cause,reason}', "
+        "completed_at IS NOT NULL "
         f"FROM cordis.jobs WHERE run_id = {_sql_str(fail_id)};",
     )
-    assert failed.split("|") == ["ERROR", "boom", "t"]
+    assert failed.split("|") == [
+        "ERROR",
+        "MAX_RECOVERY_ATTEMPTS_EXCEEDED",
+        "boom",
+        "t",
+    ]
 
 
 def test_stale_reap_and_auto_claim(pgdata: Path) -> None:
@@ -326,6 +338,13 @@ def test_stale_reap_and_auto_claim(pgdata: Path) -> None:
     run_id = "p01-stale"
     psql(server, P01_DB, f"DELETE FROM cordis.jobs WHERE run_id = {_sql_str(run_id)};")
     _insert_pending(server, run_id)
+    psql(
+        server,
+        P01_DB,
+        "UPDATE cordis.jobs SET retry_backoff_base_seconds = 0, "
+        "retry_backoff_max_seconds = 0 "
+        f"WHERE run_id = {_sql_str(run_id)};",
+    )
     old_token = psql(
         server,
         P01_DB,
@@ -386,6 +405,13 @@ def test_stale_reap_and_auto_claim(pgdata: Path) -> None:
     auto_id = "p01-stale-auto"
     psql(server, P01_DB, f"DELETE FROM cordis.jobs WHERE run_id = {_sql_str(auto_id)};")
     _insert_pending(server, auto_id)
+    psql(
+        server,
+        P01_DB,
+        "UPDATE cordis.jobs SET retry_backoff_base_seconds = 0, "
+        "retry_backoff_max_seconds = 0 "
+        f"WHERE run_id = {_sql_str(auto_id)};",
+    )
     auto_old = psql(
         server,
         P01_DB,
@@ -410,10 +436,14 @@ def test_stale_reap_and_auto_claim(pgdata: Path) -> None:
     assert claimed_by == "new"
 
 
-def test_reserved_waiting_sleeping_not_claimed(pgdata: Path) -> None:
+def test_waiting_and_future_sleeping_not_claimed_but_due_sleeping_is(pgdata: Path) -> None:
     _ensure_p01(pgdata)
     server = get_server(pgdata)
-    for status, run_id in (("WAITING", "p01-waiting"), ("SLEEPING", "p01-sleeping")):
+
+    for status, run_id, available_at in (
+        ("WAITING", "p01-waiting", "'-infinity'::timestamptz"),
+        ("SLEEPING", "p01-sleeping-future", "clock_timestamp() + interval '1 hour'"),
+    ):
         psql(
             server,
             P01_DB,
@@ -423,7 +453,7 @@ def test_reserved_waiting_sleeping_not_claimed(pgdata: Path) -> None:
             server,
             P01_DB,
             "INSERT INTO cordis.jobs (run_id, job_type, status, available_at) VALUES ("
-            f"{_sql_str(run_id)}, 'p01_test', {_sql_str(status)}, '-infinity'::timestamptz);",
+            f"{_sql_str(run_id)}, 'p01_test', {_sql_str(status)}, {available_at});",
         )
         count = psql(
             server,
@@ -431,12 +461,27 @@ def test_reserved_waiting_sleeping_not_claimed(pgdata: Path) -> None:
             f"SELECT count(*) FROM cordis.claim_job({_sql_str(run_id)}, 'worker', 90);",
         )
         assert count == "0"
-        stayed = psql(
+        assert psql(
             server,
             P01_DB,
             f"SELECT status FROM cordis.jobs WHERE run_id = {_sql_str(run_id)};",
-        )
-        assert stayed == status
+        ) == status
+
+    due_id = "p01-sleeping-due"
+    psql(server, P01_DB, f"DELETE FROM cordis.jobs WHERE run_id = {_sql_str(due_id)};")
+    psql(
+        server,
+        P01_DB,
+        "INSERT INTO cordis.jobs (run_id, job_type, status, available_at) VALUES ("
+        f"{_sql_str(due_id)}, 'p01_test', 'SLEEPING', '-infinity'::timestamptz);",
+    )
+    claimed = psql(
+        server,
+        P01_DB,
+        "SELECT status || '|' || claimed_by FROM cordis.claim_job("
+        f"{_sql_str(due_id)}, 'worker', 90);",
+    )
+    assert claimed == "RUNNING|worker"
 
 
 def test_run_id_unique_including_terminal(pgdata: Path) -> None:
@@ -646,7 +691,9 @@ def test_catalog_defaults_identity_and_index_predicates(pgdata: Path) -> None:
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE n.nspname = 'cordis' AND c.relname = 'jobs_ready_idx';",
     )
-    assert "status = 'PENDING'" in ready
+    assert "PENDING" in ready
+    assert "SLEEPING" in ready
+    assert "WAITING" not in ready
     assert "priority DESC" in ready
     stale = psql(
         server,

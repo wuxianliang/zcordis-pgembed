@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 import stat
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -622,8 +623,22 @@ def test_p10_await_event_immediate_and_suspend_paths(pgdata: Path) -> None:
     assert lost.accepted is False
 
 
-def test_p10_sleep_is_typed_but_unavailable_without_p04(pgdata: Path) -> None:
-    _reset(pgdata)
+def test_p10_sleep_is_typed_but_unavailable_without_p04(
+    pgdata: Path, tmp_path: Path
+) -> None:
+    tree = tmp_path / "sql_without_p04"
+    shutil.copytree(SQL, tree)
+    (tree / "0004_p04_sleep_retry.sql").unlink()
+    result = run_apply(
+        "--pgdata",
+        str(pgdata),
+        "--database",
+        P10_DB,
+        "--sql-root",
+        str(tree),
+        "--reset",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
     server = get_server(pgdata)
     run_id = "run-sleep"
     _insert_job(server, run_id)
@@ -654,6 +669,35 @@ def test_p10_sleep_is_typed_but_unavailable_without_p04(pgdata: Path) -> None:
         )
         == "0"
     )
+
+
+def test_p10_product_tree_sleep_claim_succeeds(pgdata: Path) -> None:
+    _reset(pgdata)
+    server = get_server(pgdata)
+    run_id = "run-sleep-p04"
+    _insert_job(server, run_id)
+    client = _client(server)
+    claimed = client.claim_job(run_id)
+    assert claimed is not None
+    until = datetime.now(timezone.utc) + timedelta(minutes=5)
+    assert client.sleep_claim(claimed.claim_token, run_id, until) is True
+    snap = client.get_job(run_id)
+    assert snap is not None
+    assert snap.status == "SLEEPING"
+    assert psql(
+        server,
+        P10_DB,
+        "SELECT claim_token IS NULL AND claimed_by IS NULL "
+        "AND claim_expires_at IS NULL FROM cordis.jobs "
+        f"WHERE run_id = {_sql_str(run_id)};",
+    ) == "t"
+    stored = psql(
+        server,
+        P10_DB,
+        "SELECT kind || '|' || (payload->>'reason') FROM cordis.agent_steps "
+        f"WHERE run_id = {_sql_str(run_id)} ORDER BY seq;",
+    )
+    assert stored == "run/sleep|sleep"
     src = (REPO / "pg_cordis_host" / "client.py").read_text(encoding="utf-8")
     assert ".p19-backup" not in src
     assert "0004_p04" not in src

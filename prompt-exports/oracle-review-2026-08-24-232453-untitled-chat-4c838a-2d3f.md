@@ -1,0 +1,23 @@
+# Oracle Review
+
+
+
+## Summary
+
+Round 2 closes the original `NaN` rejection and `ln(max/base)` division-overflow defects, and the deadline-first and no-new-table regressions are now covered. The core P04 state machine otherwise remains aligned with the plan: sleep is logged before claim release, timeout preserves event → jobs → wait locking, due sleepers use the existing claim path, and explicit/stale failures share the same jobs row and attempt budget. **The review does not pass yet:** the replay-schema P1 is only partially fixed, the evaluator still has a reachable intermediate `power()` overflow for accepted policies, and the patch contains P19 assertions that contradict the stated P07/no-0019 target tree.
+
+## P1 — Should fix
+
+- **`sql/0004_p04_sleep_retry.sql:269-274` — The logarithmic threshold fixes ratio overflow but does not prevent `power()` itself from overflowing.** The function establishes that the final mathematical product is below the cap, but then evaluates `power(p_factor, v_exponent)` before multiplying by the tiny base. For example, `retry_delay_seconds(3, 1e-320, 1e155, 86400)` has an uncapped result around `1e-10`, yet `power(1e155, 2)` overflows as an intermediate. Thus a policy accepted by both the function and table constraints can still fail during `fail_claim` or `release_stale`, contrary to the plan’s requirement to avoid floating-point overflow.
+  - **Suggestion:** calculate `v_log_delay := ln(p_base_seconds) + v_exponent * ln(p_factor)`. Return the cap when `v_log_delay >= ln(p_max_seconds)`; otherwise return `exp(v_log_delay)`. Add the intermediate-overflow case above and assert an approximately `1e-10` result rather than merely checking that a small-factor case is not infinity.
+
+- **`sql/0004_p04_sleep_retry.sql:5-99, 115-206` — The round-one replay-schema P1 remains open because the new metadata verification is incomplete and too permissive.** The validator never checks any column default: `v_def` is populated for the base column but unused, and defaults for `max_attempts`, factor, and cap are not read. It validates only the name-containing shape of `jobs_max_attempts_check`; it does not verify that it is a validated CHECK with the required expression, and it does not inspect the definitions of the other four policy constraints at all. Consequently, pre-existing objects such as an integer `max_attempts DEFAULT NULL`, a factor `DEFAULT 99`, `CHECK (max_attempts IS NULL OR true)`, or same-named `CHECK (true)` constraints for base/factor/cap/bounds can still pass apply while violating P04’s durable policy contract.
+  - **Suggestion:** validate the exact normalized defaults of all four columns and the type, `convalidated` state, and normalized expression of all five named CHECK constraints. Reject every mismatch with `object_not_in_prerequisite_state`. The unconditional drop/recreate of both indexes adequately closes the index part of the original finding.
+
+- **`tests/test_p00_sql_source.py:52-142, 535-538`; `tests/test_p01_claim.py:130, 575`; `sql/README.md:79` — P19 changes are mixed into the P04 ship set and contradict the declared P07/no-0019 verification tree.** The diff renames the current-tree test to P19, requires `cordis.paradigm_policies`, changes several full-tree version assertions to `p19`, and documents `0019`, while the expected file list contains no `0019` and the user-specified target still ends at P07. In particular, `_ensure_p01()` applying a no-0019 tree will return `p07`, so the new `p19` assertions cannot hold against the stated ship set.
+  - **Suggestion:** revert the P19-specific test renaming, `paradigm_policies` assertion, `p19` version expectations, and README paragraph from this P04 patch. Keep the full-tree marker at `p07` and land P19 documentation/assertions only with the separate P19 ship set.
+
+## P2 — Consider
+
+- **`tests/test_p04_sleep_retry.py:291-379, 1298-1336` — Round-one policy and replay test coverage is still only partially addressed.** The added tests cover a NaN factor, one benign tiny-base calculation, and an incompatible `max_attempts` type. They still do not exercise invalid/null/infinite/negative base and cap values, base-over-cap constraints at the table boundary, wrong defaults, or same-named incompatible CHECK definitions. The type-conflict test may also fail while PostgreSQL is constructing a constraint, without proving that the new metadata validator detects the conflict.
+  - **Suggestion:** parameterize invalid inserts across every policy constraint, add the accepted intermediate-`power()` overflow case, and add replay fixtures for a wrong default plus at least one same-named fake CHECK such as `jobs_retry_backoff_factor_check CHECK (true)`.

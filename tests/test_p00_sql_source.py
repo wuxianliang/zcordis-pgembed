@@ -65,8 +65,11 @@ KERNEL_FUNCTIONS = (
     "cordis.release_stale",
     "cordis.renew_claim",
     "cordis.request_grant",
+    "cordis.resolve_due_waits",
+    "cordis.retry_delay_seconds",
     "cordis.revoke_grant",
     "cordis.run_state",
+    "cordis.sleep_claim",
     "cordis.slice_has_grant",
     "cordis.slice_live_grants",
     "cordis.step_once",
@@ -89,7 +92,8 @@ def test_fresh_apply_lists_current_tree_and_p21(pgdata: Path) -> None:
     assert result.returncode == 0, combined
     assert (
         "files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+        "0003_p03_wait_event.sql,0004_p04_sleep_retry.sql,"
+        "0005_p05_one_step_driver.sql,"
         "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
         "0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql,"
         "0021_p09_in_db_worker.sql"
@@ -254,7 +258,8 @@ def test_numbered_file_extension_without_loader_change(
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
         f"files=0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-        f"0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+        f"0003_p03_wait_event.sql,0004_p04_sleep_retry.sql,"
+        f"0005_p05_one_step_driver.sql,"
         f"0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
         f"0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql,"
         f"0021_p09_in_db_worker.sql,{probe_name}"

@@ -37,7 +37,7 @@ Worker IDs are observational (`claimed_by`). The claim token is the capability. 
 
 Default lease is 90 seconds. There is no heartbeat thread. Before a blocking external call, renew and keep lease ≥ operation timeout + 30 seconds; for long work renew at intervals no greater than `min(30s, lease/3)`. A false renew means stop and append nothing.
 
-Boolean transitions (`renew_claim`, `yield_claim`, `complete_claim`, `fail_claim`) return SQL’s boolean unchanged. `false` means the token is dead. Do not retry it and do not issue unfenced `UPDATE`s. After P04, `fail_claim` may retry-or-terminal; inspect `get_job` instead of assuming `ERROR`.
+Boolean transitions (`renew_claim`, `yield_claim`, `complete_claim`, `fail_claim`) return SQL’s boolean unchanged. `false` means the token is dead. Do not retry it and do not issue unfenced `UPDATE`s. On the P04 product tree, `fail_claim=true` may mean retry/requeue or terminal exhaustion; inspect `get_job` instead of assuming `ERROR`. If the run already has a committed `error` event, P04 treats it as a terminality fence and the jobs row becomes `ERROR` without a second error append.
 
 Do not compare `claim_expires_at` to the host clock. Expiry is fenced in SQL with `clock_timestamp()`.
 
@@ -63,7 +63,7 @@ User-facing history uses `emit_step_scoped` with explicit `run_id` and `slice_id
 
 ## Sleep
 
-`sleep_claim` is the only method that may use two `psql` processes: a non-mutating `to_regprocedure` probe, then the invocation if present. If the probe is negative, or the invocation fails with SQLSTATE `42883`, it raises `CordisFeatureUnavailable` with code `P10_SLEEP_UNAVAILABLE` and does not emulate sleep. Presence is not cached across calls.
+`sleep_claim` is present on the product tree through `0004_p04_sleep_retry.sql`. It is the only method that may use two `psql` processes: a non-mutating `to_regprocedure` probe, then the invocation if present. A successful call appends `run/sleep`, changes the row to `SLEEPING`, stores `available_at`, and releases the claim atomically. On a deliberately truncated tree without 0004, a negative probe—or an invocation failure with SQLSTATE `42883`—raises `CordisFeatureUnavailable` with code `P10_SLEEP_UNAVAILABLE`; the client never emulates sleep. Presence is not cached across calls.
 
 ## Await
 

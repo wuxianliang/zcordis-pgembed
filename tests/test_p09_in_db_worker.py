@@ -13,7 +13,8 @@ from tests.conftest import SQL, load_apply_module, psql, run_apply
 P09_DB = "cordis_p09"
 TREE_FILES = (
     "0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-    "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+    "0003_p03_wait_event.sql,0004_p04_sleep_retry.sql,"
+    "0005_p05_one_step_driver.sql,"
     "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
     "0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql,"
     "0021_p09_in_db_worker.sql"
@@ -536,6 +537,16 @@ def test_p09_enqueue_validates_handler_paradigm_and_payload(pgdata: Path) -> Non
         "FROM cordis.jobs WHERE run_id = 'p09-enq-ok';",
     )
     assert row == "kernel.step_once|codeact|PENDING"
+    policy = psql(
+        server,
+        P09_DB,
+        "SELECT max_attempts::text || '|' || "
+        "retry_backoff_base_seconds::text || '|' || "
+        "retry_backoff_factor::text || '|' || "
+        "retry_backoff_max_seconds::text FROM cordis.jobs "
+        "WHERE run_id = 'p09-enq-ok';",
+    )
+    assert policy == "3|30|2|86400"
     question = psql(
         server,
         P09_DB,

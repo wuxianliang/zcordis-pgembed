@@ -15,7 +15,8 @@ from tests.conftest import SQL, load_apply_module, next_sql_prefix, psql, run_ap
 P08_DB = "cordis_p08"
 TREE_FILES = (
     "0000_kernel.sql,0001_p01_claim.sql,0002_p02_log.sql,"
-    "0003_p03_wait_event.sql,0005_p05_one_step_driver.sql,"
+    "0003_p03_wait_event.sql,0004_p04_sleep_retry.sql,"
+    "0005_p05_one_step_driver.sql,"
     "0006_p06_plugin_catalog.sql,0007_p07_grant_registry.sql,"
     "0019_p19_paradigm_policies.sql,0020_p08_four_seam_enforcement.sql,"
     "0021_p09_in_db_worker.sql"

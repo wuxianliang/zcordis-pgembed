@@ -1,0 +1,26 @@
+# Oracle Review
+
+
+
+## Summary
+
+P04 broadly implements the planned state machine correctly: `sleep_claim` logs through the claim-fenced writer before releasing ownership, due `PENDING`/`SLEEPING` rows share the existing claim path, deadline resolution follows event → jobs → wait locking with deadline-first selection, explicit and lease-timeout failures share the attempt budget, terminal errors use the required nested dead-letter envelope, and retries remain on the same jobs row without introducing another queue or direct log writer. The main issues are in numeric-policy validation/evaluation and replay-time schema verification; the concurrency and core transition paths otherwise match the plan.
+
+## P1 — Should fix
+
+- **`sql/0004_p04_sleep_retry.sql:64-68, 145-190` — The finite-factor validation admits `NaN`, and valid extreme policies can overflow inside the saturation check.** PostgreSQL treats floating-point `NaN` as equal to itself and greater than ordinary values, so `retry_backoff_factor = retry_backoff_factor`, `retry_backoff_factor >= 1`, and `retry_backoff_factor <> 'Infinity'` do not reject it. The equivalent function validation using `p_factor <> p_factor` has the same problem. Separately, `ln(p_max_seconds / p_base_seconds)` can overflow during the division for a supported tiny positive base such as `1e-320`, even when the requested retry delay itself is representable and should simply be capped or remain tiny. This violates the plan’s requirement that all accepted values be finite and that saturation be detected before floating-point overflow.
+  - **Suggestion:** explicitly reject `'NaN'::double precision` in both the table constraint and function validation. Compute the threshold in the log domain without first dividing, for example `(ln(p_max_seconds) - ln(p_base_seconds)) / ln(p_factor)`, after the existing zero cases. Add tests for a NaN factor at both the column and function boundaries, plus tiny-base/large-factor cases that would overflow the current ratio or `power` calculation.
+
+- **`sql/0004_p04_sleep_retry.sql:5-103, 111-113` — Replay guards silently accept incompatible pre-existing schema objects instead of failing as specified.** `ADD COLUMN IF NOT EXISTS` does not validate the type, nullability, or default of a column that already exists. Likewise, the constraint guards check only the constraint name, not its type or definition; a same-named `CHECK (true)` would be accepted. A nullable pre-existing backoff column can consequently pass the checks because SQL `CHECK` accepts `NULL`, then cause `fail_claim` and `release_stale` to fail at runtime. `run_waits_deadline_idx` has the same name-only `IF NOT EXISTS` weakness. This contradicts the plan’s explicit contract that incompatible manually-created columns or constraints cause apply to fail rather than leaving a partially compatible kernel.
+  - **Suggestion:** after each `IF NOT EXISTS` operation, validate `pg_attribute`, `pg_attrdef`, `pg_constraint`, and `pg_index` metadata against the required definitions and raise `object_not_in_prerequisite_state` or a clear migration exception on mismatch. Add an in-place apply test that first creates a conflicting column, constraint, and deadline index after applying through P03, then verifies that P04 refuses the incompatible schema.
+
+## P2 — Consider
+
+- **`tests/test_p04_sleep_retry.py:291-403` — Policy tests do not exercise most of the promised column constraints or the evaluator’s numeric boundary.** The catalog test confirms constraint names but only attempts an invalid `max_attempts`; it never inserts null/non-finite/negative base, NaN or infinite factor, invalid cap, or base greater than cap. The evaluator test covers NaN base and infinite factor but misses NaN factor and values near the representable floating-point limits, which is why the numeric defects above remain green.
+  - **Suggestion:** parameterize invalid row inserts for every named policy constraint and mirror those cases against `retry_delay_seconds`. Include at least one accepted subnormal/tiny base case and one very large finite factor case.
+
+- **`tests/test_p04_sleep_retry.py:833-980` — Deadline-first bounded selection is implemented but not proven by a regression test.** The critique specifically elevated deadline-first ordering to prevent starvation under `p_limit`, but the tests cover only duplicate resolution and emit/timeout races. A future change back to event-key ordering would leave the current suite green.
+  - **Suggestion:** create at least two due waits whose event-key lexical order is opposite their deadline order, call `resolve_due_waits(NULL, 1)`, and assert that only the oldest deadline is resolved first.
+
+- **`tests/test_p04_sleep_retry.py:1266-1300` — The “no second queue” source test does not actually reject additional `cordis` tables.** It rejects direct log mutations and several forbidden tokens, but neither this test nor the fresh-catalog test uses a table allowlist. An added `cordis.tasks` or `cordis.retry_queue` table would therefore evade the stated one-queue proof.
+  - **Suggestion:** inspect sanitized `CREATE TABLE` statements in `0004` and require none, or assert that the P04-only catalog’s `cordis` base-table set is exactly `jobs`, `agent_steps`, `run_events`, and `run_waits`.

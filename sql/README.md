@@ -43,6 +43,7 @@ P00 creates schema `cordis` and `cordis.get_schema_version() → text`. This is 
 tree through 0001_p01_claim.sql → p01
 tree through 0002_p02_log.sql   → p02
 tree through 0003_p03_wait_event.sql → p03
+tree through 0004_p04_sleep_retry.sql → p04
 tree through 0005_p05_one_step_driver.sql → p05
 tree including 0006_p06_plugin_catalog.sql → p06
 tree including 0007_p07_grant_registry.sql → p07
@@ -54,6 +55,8 @@ tree including 0021_p09_in_db_worker.sql → p21  (current product tree)
 `0002` adds `cordis.agent_steps` as the append-only history source of truth. Checkpoint is a log append (claim-fenced when `cordis.jobs` exists), not a `c_*` table. P02 does not create `agent_runs` or public objects.
 
 `0003` adds kernel side tables `cordis.run_events` and `cordis.run_waits` plus `cordis.await_event` / `cordis.emit_event`. They serve the existing `cordis.jobs` row (status `WAITING`); they are not a second queue and not payload history. `run_events.payload` is a first-write fence (`SQL NULL` = not emitted). Canonical `event/emit` rows live on an internal `@event/<uuid>` log stream, which is not a jobs row. A tree that ends at `0003` reports `p03`.
+
+`0004` adds claim-fenced sleep, wait-deadline resolution, and same-row task retry. Jobs default to three total attempts with deterministic `30 × 2^(attempt−1)` second backoff capped at 86400; `max_attempts=NULL` opts into unlimited recovery. Due `SLEEPING` rows are claimed directly and append `run/wake` with `wake_reason="sleep"`. Timeout resolution selects the oldest bounded due waits by deadline, then locks/processes the materialized set in event-key order so emit and timeout retain one winner without a second queue. `fail_claim` and stale lease recovery share `jobs.attempt`; exhausted recovery writes `MAX_RECOVERY_ATTEMPTS_EXCEEDED`. A prewritten `error` log event is terminal historical truth, so P05/P09 failure paths terminalize without retry or a duplicate error row. A tree ending at `0004` reports `p04`; the current product tree continues through `0021` and reports `p21`. P04 retry fields do not consume P06 `retry_class`.
 
 `0005` adds the paradigm-neutral driver `cordis.step_once` and a replaceable SQL mock hook `cordis.invoke_llm`. One live claim processes at most one named step `s-N` (LLM checkpoint or mock invocation, then one mock tool observation or a final answer) and returns a text outcome. The caller maps yield / complete / fail through P01 claim verbs; P05 does not change jobs status, enqueue work, dispatch plugins, wait, retry, run a worker loop, or perform HTTP. Provider key is `md5(run_id || '/' || step_name)`. A tree that ends at `0005` reports `p05`; a tree that ends at `0006` reports `p06`; a tree that ends at `0007` reports `p07`; a tree that ends at `0019` reports `p19`; a tree that ends at `0020` reports `p20`; the current product tree ends at `0021` and reports `p21`.
 

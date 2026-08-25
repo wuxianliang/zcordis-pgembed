@@ -266,6 +266,7 @@ def test_p11_in_db_host_in_db_alternation_and_bidirectional_stale_takeover(
     pgdata: Path,
 ) -> None:
     result = _reset(pgdata)
+    assert "0004_p04_sleep_retry.sql" in result.stdout
     assert "0021_p09_in_db_worker.sql" in result.stdout
     server = get_server(pgdata)
     assert psql(server, P11_DB, "SELECT cordis.get_schema_version();") == "p21"
@@ -279,6 +280,13 @@ def test_p11_in_db_host_in_db_alternation_and_bidirectional_stale_takeover(
     assert HOST_WORKER_RE.fullmatch(host_client.worker_id)
 
     job_id = _enqueue(server, RUN_ID, P11_PAYLOAD)
+    psql(
+        server,
+        P11_DB,
+        "UPDATE cordis.jobs SET retry_backoff_base_seconds = 0, "
+        "retry_backoff_max_seconds = 0 "
+        f"WHERE run_id = {_sql_str(RUN_ID)};",
+    )
     job = _job_snapshot(server, RUN_ID)
     assert job["job_id"] == job_id
     assert job["job_type"] == "kernel.step_once"
@@ -412,7 +420,14 @@ def test_p11_in_db_host_in_db_alternation_and_bidirectional_stale_takeover(
     assert host_client.yield_claim(host_live_token) is False
     assert _raw_yield(server, db_takeover_token) is True
     _assert_pending(_job_snapshot(server, RUN_ID), job_id, 2)
-    assert _kind_names(_log_rows(server, RUN_ID)) == expected_log
+    logs = _log_rows(server, RUN_ID)
+    first_takeover_log = expected_log + [("run/claim_timeout", None)]
+    assert _kind_names(logs) == first_takeover_log
+    first_timeout = logs[-1]["payload"]
+    assert first_timeout["outcome"] == "retry"
+    assert first_timeout["failed_attempt"] == 1
+    assert first_timeout["next_attempt"] == 2
+    assert first_timeout["delay_seconds"] == 0
     assert _jobs_count(server) == 1
 
     db_live = _raw_claim(server, IN_DB_WORKER_ID, RUN_ID)
@@ -443,7 +458,16 @@ def test_p11_in_db_host_in_db_alternation_and_bidirectional_stale_takeover(
     assert _jobs_count(server, RUN_ID) == 1
     assert _jobs_count(server) == 1
     logs = _log_rows(server, RUN_ID)
-    assert _kind_names(logs) == expected_log
-    assert not any(kind in {"final", "error"} for kind, _ in _kind_names(logs))
+    final_log = first_takeover_log + [("run/claim_timeout", None)]
+    assert _kind_names(logs) == final_log
+    second_timeout = logs[-1]["payload"]
+    assert second_timeout["outcome"] == "retry"
+    assert second_timeout["failed_attempt"] == 2
+    assert second_timeout["next_attempt"] == 3
+    assert second_timeout["delay_seconds"] == 0
+    assert not any(
+        kind in {"run/sleep", "run/wake", "final", "error"}
+        for kind, _ in _kind_names(logs)
+    )
     assert _next_step_name(server, RUN_ID) == "s-3"
     assert len(seen_tokens) == 5

@@ -1585,7 +1585,9 @@ The install role can currently modify jobs payload directly. Fingerprint mismatc
 
 Every P05-created error is terminal because current `run_state` treats any error as terminal. P04 must not simply requeue a P05-failed job while leaving that error unqualified; it must explicitly revise the failure/log projection contract if transient retries are introduced.
 
-P05-ending tests copy `0000`–`0003` plus `0005` and exclude `0004`, so they keep P01’s always-terminal `fail_claim`. If `sql/0004_*` is in the full tree when P05 regressions run there, map `fail` through `fail_claim` only with a jobs retry policy that dead-letters immediately (P04 `max_attempts=1`). Do not make P05 protocol errors retryable.
+P05-ending tests copy `0000`–`0003` plus `0005` and exclude `0004`, so they keep P01’s always-terminal `fail_claim`.
+
+**Superseded 2026-08-25 by the approved P04 terminality fence:** in a full tree containing `0004`, P05/P09 append the terminal `error` event before calling `fail_claim`. P04 detects that committed event under the jobs-row lock and terminalizes the jobs row without retry, without incrementing `attempt`, and without appending a second `error`. These prewritten-error paths therefore do **not** require `max_attempts=1`; that setting remains appropriate only for direct P01-style `fail_claim` fixtures that have no prior `error` event. P05 protocol errors remain non-retryable.
 
 ### Hook replacement and replay
 
